@@ -27,9 +27,10 @@
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
 #include "core/rocpd/data_processor.hpp"
-#include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
+
+#include <rocstorage/database.hpp>
 #include "library/thread_info.hpp"
 
 #include <cstdint>

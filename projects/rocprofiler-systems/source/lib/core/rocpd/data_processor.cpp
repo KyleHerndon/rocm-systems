@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "data_processor.hpp"
-#include "core/rocpd/data_storage/database.hpp"
-#include "core/rocpd/data_storage/table_insert_query.hpp"
+#include <rocstorage/database.hpp>
+#include <rocstorage/table_query.hpp>
 #include "debug.hpp"
 #include <memory>
 #include <stdexcept>

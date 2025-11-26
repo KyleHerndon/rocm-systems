@@ -20,27 +20,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "database.hpp"
-#include "common/md5sum.hpp"
-#include "debug.hpp"
-#include "node_info.hpp"
+#include "rocstorage/database.hpp"
+#include "rocstorage/md5sum.hpp"
+#include "default_logger.hpp"
+#include "default_node_info.hpp"
 
-#include <config.hpp>
 #include <regex>
 #include <string>
-#include <timemory/environment/types.hpp>
-#include <timemory/utility/filepath.hpp>
+#include <cstdlib>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
 #    include <rocprofiler-sdk-rocpd/rocpd.h>
 #    include <rocprofiler-sdk-rocpd/types.h>
 #else
-#    include "core/rocpd/data_storage/schema/data_views.hpp"
-#    include "core/rocpd/data_storage/schema/marker_views.hpp"
-#    include "core/rocpd/data_storage/schema/rocpd_tables.hpp"
-#    include "core/rocpd/data_storage/schema/rocpd_views.hpp"
-#    include "core/rocpd/data_storage/schema/summary_views.hpp"
+#    include "rocstorage/schema/data_views.hpp"
+#    include "rocstorage/schema/marker_views.hpp"
+#    include "rocstorage/schema/rocpd_tables.hpp"
+#    include "rocstorage/schema/rocpd_views.hpp"
+#    include "rocstorage/schema/summary_views.hpp"
 
 namespace
 {
@@ -61,14 +60,54 @@ enum rocpd_sql_schema_kind_t
 
 namespace
 {
-void
-create_directory_for_database_file(const std::string& db_file)
+std::string
+get_dirname(const std::string& path)
 {
-    auto _db_dirname = tim::filepath::dirname(db_file);
-    if(!tim::filepath::direxists(_db_dirname))
+    size_t pos = path.find_last_of("/\\");
+    return (pos != std::string::npos) ? path.substr(0, pos) : ".";
+}
+
+bool
+dir_exists(const std::string& path)
+{
+    struct stat info;
+    return stat(path.c_str(), &info) == 0 && (info.st_mode & S_IFDIR);
+}
+
+void
+make_dir(const std::string& path)
+{
+    if (!dir_exists(path))
     {
-        tim::filepath::makedir(_db_dirname);
+        // Try to create parent directory first if needed
+        std::string parent = get_dirname(path);
+        if (!parent.empty() && parent != "." && parent != "/" && !dir_exists(parent))
+        {
+            make_dir(parent);
+        }
+        mkdir(path.c_str(), 0755);
     }
+}
+
+std::string
+get_default_db_path(int pid)
+{
+    const char* dir = std::getenv("ROCSTORAGE_DATABASE_DIR");
+    if (!dir) dir = std::getenv("ROCPROFSYS_DATABASE_DIR");
+
+    std::string base = dir ? std::string(dir) : ".";
+    return base + "/rocpd-" + std::to_string(pid) + ".db";
+}
+
+std::string
+make_absolute(const std::string& path)
+{
+    if (!path.empty() && path[0] != '/')
+    {
+        const char* pwd = std::getenv("PWD");
+        if (pwd) return std::string(pwd) + "/" + path;
+    }
+    return path;
 }
 
 std::string
@@ -95,13 +134,11 @@ load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
 {
     if(user_data == nullptr || schema_content == nullptr)
     {
-        ROCPROFSYS_WARNING(1, "Invalid user data or schema content pointer");
         return;
     }
     auto* query = static_cast<std::string*>(user_data);
     if(query == nullptr)
     {
-        ROCPROFSYS_WARNING(1, "Invalid query pointer");
         return;
     }
     *query = std::string(schema_content);
@@ -109,7 +146,8 @@ load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
 #endif
 
 std::string
-get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
+get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid,
+                 rocstorage::logger* log)
 {
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
     const auto                         jinja_size = 2 * upid.size();
@@ -119,9 +157,9 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
     auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
                                                ROCPD_SQL_OPTIONS_NONE, &info, load_schema_cb,
                                                nullptr, 0, &query);
-    if(status != ROCPD_STATUS_SUCCESS)
+    if(status != ROCPD_STATUS_SUCCESS && log)
     {
-        ROCPROFSYS_WARNING(0, "Unable to load rocpd schema. Error code: %d", status);
+        log->warning(0, "Unable to load rocpd schema. Error code: %d", status);
     }
     return query;
 #else
@@ -130,21 +168,23 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
     switch(schema_kind)
     {
         case ROCPD_SQL_SCHEMA_ROCPD_TABLES:
-            schema_content = rocprofsys::rocpd::data_storage::schema::ROCPD_TABLES_SQL;
+            schema_content = rocstorage::schema::ROCPD_TABLES_SQL;
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_VIEWS:
-            schema_content = rocprofsys::rocpd::data_storage::schema::ROCPD_VIEWS_SQL;
+            schema_content = rocstorage::schema::ROCPD_VIEWS_SQL;
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS:
-            schema_content = rocprofsys::rocpd::data_storage::schema::DATA_VIEWS_SQL;
+            schema_content = rocstorage::schema::DATA_VIEWS_SQL;
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS:
-            schema_content = rocprofsys::rocpd::data_storage::schema::MARKER_VIEWS_SQL;
+            schema_content = rocstorage::schema::MARKER_VIEWS_SQL;
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
-            schema_content = rocprofsys::rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
+            schema_content = rocstorage::schema::SUMMARY_VIEWS_SQL;
             break;
-        default: ROCPROFSYS_WARNING(0, "Unknown schema kind: %d", schema_kind); return "";
+        default:
+            if (log) log->warning(0, "Unknown schema kind: %d", schema_kind);
+            return "";
     }
 
     return process_schema_template(schema_content, upid);
@@ -153,26 +193,58 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 
 }  // namespace
 
-namespace rocprofsys
+namespace rocstorage
 {
-namespace rocpd
+// Full configuration constructor
+database::database(const database_config& config)
+    : m_logger(config.log)
+    , m_node_info(config.node)
 {
-namespace data_storage
-{
-database::database(int pid, int ppid)
-{
-    auto _tag        = std::to_string(pid);
-    auto db_name     = std::string{ "rocpd" };
-    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name, _tag);
-    create_directory_for_database_file(abs_db_path);
-    ROCPROFSYS_VERBOSE(0, "Database: %s\r\n", abs_db_path.c_str());
+    // Use defaults if not provided
+    if (!m_logger)
+    {
+        m_logger = std::make_shared<default_logger>();
+    }
+    if (!m_node_info)
+    {
+        m_node_info = std::make_shared<default_node_info>();
+    }
 
-    validate_sqlite3_result(sqlite3_open(":memory:", &_sqlite3_db_temp), "",
-                            "database open failed!");
-    validate_sqlite3_result(sqlite3_open(abs_db_path.c_str(), &_sqlite3_db), "",
-                            "database open failed!");
-    m_upid = generate_upid(pid, ppid);
+    // Determine database path
+    std::string db_path = config.db_path;
+    if (db_path.empty())
+    {
+        db_path = get_default_db_path(config.pid);
+    }
+    db_path = make_absolute(db_path);
+
+    // Create directory if needed
+    make_dir(get_dirname(db_path));
+
+    m_logger->verbose(0, "Database: %s\r\n", db_path.c_str());
+
+    // Open databases
+    if (sqlite3_open(":memory:", &_sqlite3_db_temp) != SQLITE_OK)
+    {
+        m_logger->warning(0, "Failed to open in-memory database");
+    }
+    if (sqlite3_open(db_path.c_str(), &_sqlite3_db) != SQLITE_OK)
+    {
+        m_logger->warning(0, "Failed to open database: %s", db_path.c_str());
+    }
+
+    // Generate UPID
+    m_upid = generate_upid(config.pid, config.ppid);
 }
+
+// Convenience constructors
+database::database(int pid, int ppid)
+    : database(database_config{pid, ppid, "", nullptr, nullptr})
+{}
+
+database::database(int pid, int ppid, std::string db_path)
+    : database(database_config{pid, ppid, std::move(db_path), nullptr, nullptr})
+{}
 
 database::~database()
 {
@@ -193,12 +265,15 @@ database::initialize_schema()
 
     for(const auto& schema_kind : schema_kinds)
     {
-        const std::string query = get_schema_query(schema_kind, upid);
+        const std::string query = get_schema_query(schema_kind, upid, m_logger.get());
 
         if(query.empty())
         {
-            ROCPROFSYS_WARNING(0, "Failed to get schema query for schema kind: %d",
-                               schema_kind);
+            if (m_logger)
+            {
+                m_logger->warning(0, "Failed to get schema query for schema kind: %d",
+                                  schema_kind);
+            }
             continue;
         }
 
@@ -222,10 +297,10 @@ database::get_upid()
 }
 
 std::string
-database::generate_upid(const int pid, const int ppid)
+database::generate_upid(int pid, int ppid)
 {
-    auto n_info = node_info::get_instance();
-    auto guid   = common::md5sum{ n_info.id, pid, ppid };
+    auto node_id = m_node_info->get_node_id();
+    auto guid = rocstorage::md5sum{ node_id, pid, ppid };
     return guid.hexdigest();
 }
 
@@ -246,6 +321,4 @@ database::flush()
     }
 }
 
-}  // namespace data_storage
-}  // namespace rocpd
-}  // namespace rocprofsys
+}  // namespace rocstorage

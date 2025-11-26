@@ -21,24 +21,29 @@
 // SOFTWARE.
 
 #pragma once
-#include "common/traits.hpp"
+#include "rocstorage/traits.hpp"
+#include "rocstorage/interfaces.hpp"
 #include <memory>
 #include <mutex>
 #include <sqlite3.h>
 #include <sstream>
 #include <stdexcept>
 
-namespace rocprofsys
-{
-namespace rocpd
-{
-namespace data_storage
+namespace rocstorage
 {
 static std::mutex _mutex;
 class database
 {
 public:
+    /// Create database with full configuration
+    explicit database(const database_config& config);
+
+    /// Convenience: create with just pid/ppid (uses defaults)
     explicit database(int pid, int ppid);
+
+    /// Convenience: create with pid/ppid and explicit path
+    explicit database(int pid, int ppid, std::string db_path);
+
     database()                      = delete;
     database(database&)             = delete;
     database& operator=(database&)  = delete;
@@ -105,7 +110,7 @@ private:
         throw std::runtime_error(ss.str());
     }
 
-    template <typename T, std::enable_if_t<!(common::traits::is_string_literal<T>() ||
+    template <typename T, std::enable_if_t<!(traits::is_string_literal<T>() ||
                                              std::is_floating_point_v<std::decay_t<T>> ||
                                              std::is_same_v<std::decay_t<T>, int64_t> ||
                                              std::is_same_v<std::decay_t<T>, uint64_t> ||
@@ -119,7 +124,7 @@ private:
     }
 
     template <typename T,
-              std::enable_if_t<common::traits::is_string_literal<T>(), int> = 0>
+              std::enable_if_t<traits::is_string_literal<T>(), int> = 0>
     void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
                     const std::string& query)
     {
@@ -196,15 +201,16 @@ public:
     std::string get_upid();
 
 private:
-    static std::string generate_upid(const int pid, const int ppid);
+    std::string generate_upid(int pid, int ppid);
 
 private:
     sqlite3*    _sqlite3_db{ nullptr };
     sqlite3*    _sqlite3_db_temp{ nullptr };
     std::string m_tag;
     std::string m_upid;
+
+    std::shared_ptr<logger> m_logger;
+    std::shared_ptr<node_info_provider> m_node_info;
 };
 
-}  // namespace data_storage
-}  // namespace rocpd
-}  // namespace rocprofsys
+}  // namespace rocstorage

@@ -381,6 +381,18 @@ if(ROCPROFSYS_BUILD_CODECOV)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
 endif()
 
+# Add rocstorage as external library
+set(ROCSTORAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../rocstorage"
+    CACHE PATH "Path to rocstorage source")
+if(EXISTS "${ROCSTORAGE_SOURCE_DIR}/CMakeLists.txt")
+    set(ROCSTORAGE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(ROCSTORAGE_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${ROCSTORAGE_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/rocstorage)
+else()
+    message(FATAL_ERROR "rocstorage not found at ${ROCSTORAGE_SOURCE_DIR}. "
+        "Please ensure rocstorage is available at the expected location or set ROCSTORAGE_SOURCE_DIR.")
+endif()
+
 add_subdirectory(source)
 
 if(ROCPROFSYS_BUILD_CODECOV)

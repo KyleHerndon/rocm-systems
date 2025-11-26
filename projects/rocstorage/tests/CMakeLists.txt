@@ -20,18 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocpd_sources ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp)
+# ------------------------------------------------------------------------------#
+#
+# rocstorage tests
+#
+# ------------------------------------------------------------------------------#
 
-set(rocpd_headers ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp)
-
-target_sources(rocprofiler-systems-core-library PRIVATE ${rocpd_sources} ${rocpd_headers})
-
-# Link against external rocstorage library
-target_link_libraries(
-    rocprofiler-systems-core-library
-    PUBLIC rocstorage::rocstorage
-)
-target_compile_definitions(
-    rocprofiler-systems-core-library
-    PRIVATE ROCPROFSYS_USE_ROCSTORAGE=1
-)
+# Add tests here as needed

@@ -31,9 +31,7 @@
 
 #include "traits.hpp"
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocstorage
 {
 
 class md5sum
@@ -465,5 +463,4 @@ compute_md5sum(std::string_view inp)
     return md5sum{ inp }.finalize().hexdigest();
 }
 
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocstorage

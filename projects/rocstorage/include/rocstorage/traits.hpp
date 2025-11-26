@@ -25,9 +25,7 @@
 #include <string>
 #include <type_traits>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocstorage
 {
 namespace traits
 {
@@ -79,5 +77,4 @@ template <typename T>
 inline constexpr bool is_optional_v = is_optional<T>::value;
 
 }  // namespace traits
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocstorage

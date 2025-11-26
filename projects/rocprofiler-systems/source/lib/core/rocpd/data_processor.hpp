@@ -22,7 +22,8 @@
 
 #pragma once
 
-#include "core/rocpd/data_storage/database.hpp"
+#include <rocstorage/database.hpp>
+#include <rocstorage/table_query.hpp>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -34,6 +35,12 @@ namespace rocprofsys
 {
 namespace rocpd
 {
+// This allows existing code using data_storage::database and data_storage::queries
+// to continue working without modification.
+namespace data_storage {
+using namespace ::rocstorage;
+namespace queries = ::rocstorage::queries;
+}
 struct data_processor
 {
     using insert_event_stmt =

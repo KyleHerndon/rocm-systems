@@ -21,37 +21,44 @@
 // SOFTWARE.
 
 #pragma once
+#include "rocstorage/interfaces.hpp"
+#include <unistd.h>
+#include <fstream>
+#include <functional>
 
-#include "insert_query_builders.hpp"
-
-namespace rocprofsys
-{
-namespace rocpd
-{
-namespace data_storage
-{
-namespace queries
+namespace rocstorage
 {
 
-struct table_insert_query
+/// Default node info provider - uses hostname and /etc/machine-id
+class default_node_info : public node_info_provider
 {
-    table_insert_query()
-    : _query_columns_builder{ _ss }
-    {}
-
-    query_builders::query_columns_builder& set_table_name(const std::string& tableName)
+public:
+    default_node_info()
     {
-        _ss.str("");
-        _ss << "INSERT INTO " << tableName << " ";
-        return _query_columns_builder;
+        // Try to read machine-id
+        std::ifstream ifs("/etc/machine-id");
+        if (ifs.is_open())
+        {
+            ifs >> m_node_id;
+        }
+
+        // Fallback to hostname
+        if (m_node_id.empty())
+        {
+            char hostname[256] = {0};
+            gethostname(hostname, sizeof(hostname));
+            m_node_id = hostname;
+        }
+
+        m_hash = std::hash<std::string>{}(m_node_id);
     }
 
+    std::string get_node_id() const override { return m_node_id; }
+    uint64_t get_node_hash() const override { return m_hash; }
+
 private:
-    std::stringstream                     _ss;
-    query_builders::query_columns_builder _query_columns_builder;
+    std::string m_node_id;
+    uint64_t m_hash = 0;
 };
 
-}  // namespace queries
-}  // namespace data_storage
-}  // namespace rocpd
-}  // namespace rocprofsys
+}  // namespace rocstorage
